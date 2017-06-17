@@ -1,0 +1,306 @@
+---
+title: "R Notebook"
+output:
+  html_document: default
+  html_notebook: default
+---
+```{r}
+
+install.packages(c("rpart", "rattle","e1071","randomForest","tm","wordcloud","SnowballC"))
+library(rpart)
+library(rattle)
+library(e1071)
+library(randomForest)
+library(ggplot2)
+library(tm)
+library(wordcloud)
+install.packages("xgboost")
+library(xgboost)
+library(SnowballC)
+#install.packages("neuralnet")
+```
+
+
+```{r}
+data_final <- read.csv("20170428_NormalizedData_MappingProject.csv")
+names(data_final)
+write.csv(data_final, "finalDataset.csv")
+```
+
+
+###Exploratory Analysis on the dataset
+```{r some exploratory analysis}
+summary(data_final$Median_Income)
+data_final2 <- data_final[-2,]
+
+##plot of the mean number of Black Families with the security Grade
+ggplot(data = data_final2, aes(Security_Grade, INHABITANTS_N)) + geom_bar(stat = "summary") + theme_light() + ylab("Average percent of Black Families") + xlab("Security Grade")
+
+
+## plot of mean income with security grade
+ggplot(data= data_final2, aes(Security_Grade, Median_Income)) + geom_bar(stat = "summary")
+
+##plot of count of Security Grade
+ggplot(data_final, aes(Security_Grade)) + geom_bar() + theme_light()
+
+```
+
+### Calculating the baseline accuracy
+```{r}
+###baseline model
+base <- length(data_final$Security_Grade[data_final$Security_Grade == "B"])/length(data_final$Security_Grade)
+```
+The Baseline model has an accuracy of 0.395
+
+
+```{r Outlier analysis}
+
+##Removing the outliers
+plot(scale(data_final2$INHABITANTS_N), scale(data_final2$Median_Income))
+```
+Observation number 2 has a median income of $5,000,000
+
+
+###Relation between Median Income and Inhabitants
+```{r fig.width=8, fig.height=8}
+###unaltered plots
+lm7 <- lm(log(Median_Income) ~ INHABITANTS_N, data= data_final)
+summary(lm7)
+plot(data_final$INHABITANTS_N, log(data_final$Median_Income), xlab = "Percent of Black Families", ylab = "Log of the Median Income")
+abline(lm7)
+plot(lm7)
+
+
+###After removing the Outliers
+linearPlot6 <- subset(data_final, data_final$INHABITANTS_N > 0 & data_final$INHABITANTS_N < 75)
+lm6 <- lm(log(Median_Income) ~ INHABITANTS_N, data = linearPlot6)
+summary(lm6)
+plot(linearPlot6$INHABITANTS_N, log(linearPlot6$Median_Income), xlab = "Percent of Black Families", ylab = "Log of the Median Income")
+abline(lm6)
+plot(lm6)
+```
+
+###Segregating the dataset into Test and Train set
+We have used 80-20 split
+```{r}
+index <- 1:nrow(data_final)
+testindex <- sample(index, trunc(length(index)/5))
+testset <- data_final[testindex,]
+trainset <- data_final[-testindex,]
+
+```
+
+
+
+###Decision Tree model
+For our first analysis we have used Decision Trees. We have taken all the Normalized variables and have tried to predict the Security grades based on it.
+```{r dec trees, fig.width=8, fig.height = 8}
+
+attach(data_final)
+mod1 <- rpart(Security_Grade ~ State + Terrain_high + Terrain_flat + Terrain_hilly + detriment_close_rr + detriment_far_bus + detriment_far_church + detriment_far_city + detriment_far_schools + detriment_far_stores + detriment_lack_police_fire + InhType_business + InhType_labor+ InhType_mixture + InhType_white_collar + InhType_retired + InhType_clerical + InhType_railroad +InhType_mechanics + InhType_gov + InhType_professional + Median_Income + INHABITANTS_F + INHABITANTS_N + Infiltration_Normalized + Desirability_Normalized, data= trainset, method = "class")
+##accuracy of the model
+fancyRpartPlot(mod1)
+mod1Predict <- predict(mod1, newdata = testset, type = "class")
+tab1 <- table(testset$Security_Grade, mod1Predict)
+accMod1 <- sum(diag(tab1))/sum(tab1)
+###An accuracy of 0.676
+####
+
+TreeMod2 <- rpart(Security_Grade ~  Terrain_high + Terrain_flat + Terrain_hilly + detriment_close_rr + detriment_far_bus + detriment_far_church + detriment_far_city + detriment_far_schools + detriment_far_stores + detriment_lack_police_fire + InhType_business + InhType_labor+ InhType_mixture + InhType_white_collar + InhType_retired + InhType_clerical + InhType_railroad +InhType_mechanics + InhType_gov + InhType_professional + Median_Income + INHABITANTS_F + INHABITANTS_N + Infiltration_Normalized + Desirability_Normalized, data= trainset, method = "class")
+###Accuracy of model - 0.705
+fancyRpartPlot(TreeMod2)
+Treemod2Predict <- predict(TreeMod2, newdata = testset, type = "class")
+tab1 <- table(testset$Security_Grade, Treemod2Predict)
+accMod2 <- sum(diag(tab1))/sum(tab1)
+### Accuracy of the Model - 0.705
+
+TreeMod3 <- rpart(Security_Grade ~  InhType_business + InhType_labor+ InhType_mixture + InhType_white_collar + InhType_retired + InhType_clerical + InhType_railroad +InhType_mechanics + InhType_gov + InhType_professional + Median_Income + INHABITANTS_F + INHABITANTS_N + Infiltration_Normalized + Desirability_Normalized, data= trainset, method = "class")
+###accuracy of the model
+fancyRpartPlot(TreeMod3)
+Treemod3Predict <- predict(TreeMod3, newdata = testset, type = "class")
+tab1 <- table(testset$Security_Grade, Treemod3Predict)
+accMod3 <- sum(diag(tab1))/sum(tab1)
+###Accuracy of the Model - 0.705
+```
+The best accuracy that we obtained from Decision trees was 70.58%
+
+###Svm models
+```{r SVM}
+SvmTest_set <- na.omit(testset)
+
+SvmMod1 <- svm(Security_Grade ~ State + Terrain_high + Terrain_flat + Terrain_hilly + detriment_close_rr + detriment_far_bus + detriment_far_church + detriment_far_city + detriment_far_schools + detriment_far_stores + detriment_lack_police_fire + InhType_business + InhType_labor+ InhType_mixture + InhType_white_collar + InhType_retired + InhType_clerical + InhType_railroad +InhType_mechanics + InhType_gov + InhType_professional + Median_Income + INHABITANTS_F + INHABITANTS_N + Infiltration_Normalized + Desirability_Normalized, data= trainset, method = "class", kernel = "radial")
+##calculating Accuracy
+SvmMod1Pred <- predict(SvmMod1, newdata = SvmTest_set, type = "class")
+SvmTab1 <- table(SvmTest_set$Security_Grade, SvmMod1Pred)
+accSVm1 <- sum(diag(SvmTab1))/sum(SvmTab1)
+###
+
+SvmModel2 <- svm(Security_Grade ~ InhType_labor + InhType_professional + Median_Income + INHABITANTS_N + Infiltration_Normalized , data= trainset, kernel = "linear")
+SvmModelPred2 <- predict(SvmModel2, newdata = SvmTest_set, type = "class")
+SvmTab2 <- table(SvmTest_set$Security_Grade, SvmModelPred2)
+accSVM2 <- sum(diag(SvmTab2))/sum(SvmTab2)
+summary(SvmModel2)
+summary(SvmModelPred2)
+```
+With SVM the highest accuracy that we obtained was 74.07%
+
+##Random Forests Model with 2000 Decision trees
+```{r Random_forests, fig.width= 10, fig.height=7}
+
+trainCom <- na.omit(trainset)
+testCom <- na.omit(trainset)
+
+rfMod1 <- randomForest(Security_Grade ~ Terrain_high + Terrain_flat + Terrain_hilly + detriment_close_rr + detriment_far_bus + detriment_far_church + detriment_far_city + detriment_far_schools + detriment_far_stores + detriment_lack_police_fire + InhType_business + InhType_labor+ InhType_mixture + InhType_white_collar + InhType_retired + InhType_clerical + InhType_railroad +InhType_mechanics + InhType_gov + InhType_professional + Median_Income + INHABITANTS_F + INHABITANTS_N + Infiltration_Normalized + Desirability_Normalized, data= trainCom, importance = TRUE, ntree = 2000, proximity = TRUE)
+##Calculation of accuracy
+rfpredicted <- predict(rfMod1, newdata = testCom)
+rfTab <- table(testCom$Security_Grade, rfpredicted)
+rfAccuracy <- sum(diag(rfTab))/sum(rfTab)
+varImpPlot(rfMod1)
+###Accuracy of the model - 0.955 
+
+###second model##
+rfMod2 <- randomForest(Security_Grade ~ detriment_far_schools + InhType_business + InhType_labor + InhType_white_collar + InhType_clerical + InhType_mechanics + InhType_professional + Median_Income + INHABITANTS_F + INHABITANTS_N + Desirability_Normalized, data= trainCom, importance = TRUE, ntree = 2000, proximity = TRUE)
+##Accuracy Calculation
+rfpredicted2 <- predict(rfMod2, newdata = testCom)
+rfTab <- table(testCom$Security_Grade, rfpredicted2)
+rfAccuracy2 <- sum(diag(rfTab))/sum(rfTab)
+varImpPlot(rfMod2)
+##The second model does not yield a higher accuracy
+```
+
+```{r}
+#output_vector = data_final2[,"Security_Grade"] == "Responder"
+#View(output_vector)
+
+test1 <- xgboost(data = data_final2, label = data_final2$Security_Grade)
+dummy
+```
+
+
+
+The highest accuracy that we obtained from Random Forests was 96.5%
+
+```{r Analysis of the Random Forests Model}
+print(rfMod1)
+MDSplot(rfMod1, trainCom$Security_Grade)
+#View(rfMod1$err.rate)
+View(rfMod1$confusion)
+View(rfMod1$votes)
+plot(rfMod1)
+
+```
+##Text analysis
+```{r Text analysis, fig.width=15, fig.height=10}
+cleaner <- function(x) {
+  cleaned <- tm_map(x, content_transformer(tolower))
+  cleaned <- tm_map(cleaned, removeNumbers)
+  cleaned <- tm_map(cleaned, removePunctuation)
+  cleaned <- tm_map(cleaned, stripWhitespace)
+  cleaned <- tm_map(cleaned, removeWords, stopwords('en'))
+  cleaned <- tm_map(cleaned, removeWords, c("property", "section", "rent", "area","ground","street", "house", "properties", "home", "street"))##Removing high frequency words which don't have much relevance
+  cleaned <- tm_map(cleaned, stemDocument)
+  cleaned <- tm_map(cleaned, removeWords, c("hous", "grade", "locat","rent", "home", "street", "along", "rang"))
+}
+
+##WordClouds
+SecA <- as.data.frame(subset(data_final$Remarks, Security_Grade == "A"))
+SecB <- as.data.frame(subset(data_final$Remarks, Security_Grade == "B"))
+SecC <- as.data.frame(subset(data_final$Remarks, Security_Grade == "C"))
+SecD <- as.data.frame(subset(data_final$Remarks, Security_Grade == "D"))
+
+SecACorpus <- VCorpus(VectorSource(SecA))
+SecBCorpus <- VCorpus(VectorSource(SecB))
+SecCCorpus <- VCorpus(VectorSource(SecC))
+SecDCorpus <- VCorpus(VectorSource(SecD))
+par(mfrow = c(1,4))
+##for Grade A
+SecACleaned <- cleaner(SecACorpus)
+
+wordcloud(SecACleaned, min.freq = 3, max.words = 70)
+
+###for Grade B
+SecBCleaned <- cleaner(SecBCorpus)
+wordcloud(SecBCleaned, min.freq = 3, max.words = 70)
+
+##for Grade C
+SecCCleaned <- cleaner(SecCCorpus)
+wordcloud(SecCCleaned, min.freq = 3, max.words = 70)
+
+##for Grade D
+SecDCleaned <- cleaner(SecDCorpus)
+wordcloud(SecDCleaned, min.freq = 1, max.words = 70)
+
+```
+WordCloud of Security Grades A,B,C,D
+
+```{r Text Analysis Through Tokenization}
+
+text_analysis <- read.csv("finalDataset_text.csv")
+##DTMTrain for inverse Document frequency
+fullCorpus <- VCorpus(VectorSource(text_analysis$Remarks))
+fullCleaned <- cleaner(fullCorpus)
+fullDTM <- DocumentTermMatrix(fullCleaned, control = list(weighting = weightTfIdf))
+fullDTMdf <- as.data.frame(as.matrix(fullDTM))
+
+
+text_analysis$Remarks <- NULL
+
+fullDTMdf <- cbind(fullDTMdf, text_analysis)
+fullDTMdf <- na.omit(fullDTMdf)
+detach(data_final)
+
+
+##creating test and train sets
+index <- 1:nrow(fullDTMdf)
+testindex <- sample(index, trunc(length(index)/5))
+testDTM <- fullDTMdf[testindex,]
+trainDTM <- fullDTMdf[-testindex,]
+
+##randomForest
+
+textRF <- randomForest(Security_Grade ~ ., data = trainDTM, ntree = 1500)
+textPredict <- predict(textRF, newdata = testDTM)
+##SVM
+textsvm <- svm(Security_Grade ~ ., data = trainDTM)
+textPredict2 <- predict(textsvm, newdata = testDTM)
+###
+###decision trees
+textrpart <- rpart(Security_Grade ~ ., data = trainDTM)
+textPredict3 <- predict(textrpart, newdata = testDTM, type = "class")
+###
+
+
+###without inversing the DTM
+text_analysis <- read.csv("finalDataset_text.csv")
+fullCorpus2 <- VCorpus(VectorSource(text_analysis$Remarks))
+fullCleaned2 <- cleaner(fullCorpus2)
+fullDTM2 <- DocumentTermMatrix(fullCleaned2)
+fullDTMdf2 <- as.data.frame(as.matrix(fullDTM2))
+
+text_analysis$Remarks <- NULL
+
+fullDTMdf2 <- cbind(fullDTMdf2, text_analysis)
+fullDTMdf2 <- na.omit(fullDTMdf2)
+#detach(data_final)
+
+
+##creating test and train sets
+index <- 1:nrow(fullDTMdf2)
+testindex2 <- sample(index, trunc(length(index)/5))
+testDTM2 <- fullDTMdf2[testindex,]
+trainDTM2 <- fullDTMdf2[-testindex,]
+###
+##models
+##decisiontrees
+textrpart2 <- rpart(Security_Grade ~ ., data = trainDTM2)
+textPredict4 <- predict(textrpart2, newdata = testDTM2, type = "class")
+
+###
+DTMTable <- table(testDTM2$Security_Grade, textPredict4)
+DTMTable
+
+DTMAccuracyrpart2 <- sum(diag(DTMTable))/sum(DTMTable)
+varImpPlot(textRF)
+```
+The highest Accuracy obtained was of 75% through decision trees.
+
